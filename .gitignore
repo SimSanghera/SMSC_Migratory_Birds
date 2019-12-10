@@ -1,0 +1,10 @@
+# Git ignore for SMSC Migratory Birds
+
+.Rproj.user
+.Rproj
+*.Rhistory
+temp
+*.db
+*.ini
+data
+Help_files
