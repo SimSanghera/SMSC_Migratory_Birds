@@ -1,0 +1,356 @@
+---
+title: 'SMSC Migratory Birds: Home Range Lab'
+author: "N Simon Sanghera"
+date: "13/12/2019"
+output: html_document
+---
+
+#------------
+Taught by Luke Powell  
+  
+**Overview**  
+Learn to calculate animal home ranges using the adehabitatHR package in R.  
+Types will be Minimum Convex Polygon and Kernel Density Estimator  
+Also, how to calculate home ranges in 3D.  
+  
+  https://ecosystems.psu.edu/research/labs/walter-lab/manual
+  https://scbi-migbirds.github.io/homeRange.html
+  
+#### Set-up  
+\  
+
+```{r, setup, include = FALSE}
+library(knitr)
+opts_knit$set(root.dir="F:/Science Projects/SMSC/SMSC_Migratory_Birds/")
+
+```
+
+
+Install packages and load libraries  
+  
+```{r libraries}
+libraries <- 
+  c(
+    "tidyverse",
+    "ggplot2",
+    "adehabitatHR",
+    "maptools"
+  )
+
+purrr::map(
+  libraries,
+  function(x) {
+    library(x, character.only = TRUE)
+  }
+)
+
+
+
+```
+  
+  
+Import the birds location data. The data are in UTM format, units are metres.  
+  
+```{r import data}
+locs <- read.csv("HomeRange/HR_data/RSHomeRangeData.csv",
+                  header = T,
+                  na.strings = c("NA", "NULL", "", "."))
+# na.strings replaces missing values with "NA"
+
+#locs <- import
+
+```
+  
+  
+Have a quick look at the data for each of the three birds  
+  
+```{r locs check}
+table(locs$bird)
+
+```
+  
+  
+  
+Import the telemetry data  
+  
+```{r telem}
+telem <- read.csv("HomeRange/HR_data/RawBrazilTelemData26aug2014.csv",
+                  header = T,
+                  na.strings = c("NA", "NULL", "", "."))
+
+```
+
+  
+### Prepare for Triangulations  
+  
+_Raw vs Adjusted Azimuth_ (compass bearing)  
+It is possible to use an uncorrected compass and make corrections later, or use a compass that aloows adjustments to declination to be made on the compass itself.  
+Or we can calculate declination (the angular distance of a point north or south of the celestial equator).  
+At most places on the Earth's surface, the compass does't point exactly towards geographic north. The deviation ofthe compass from **TRUE NORTH** is an angle called **DECLINATION** (or magnetic declination).  
+  
+#### Conditions that affect radioteletry:  
+  - topography 
+  - wet vegetation  
+  - distance to animal  
+  - size of transmitter  
+  - animal behaivour  
+  
+#### How to triangulate data  
+  Two pieces of software are readily available on PCs:  
+  - LOCATE III: free program, but buggy  
+  - LOAS: expensive, not buggy  
+  
+#### Home-Range: how many points until home range stabilizes?  
+  - 2D: usually 30 - 50 _independent_ points is usually enough (Seamen _et al._ 1999, JWM)  
+  - 3D: around 80 independent points (Cooper _et al._, 2014, The Auk)  
+  - Discuss biological (Lair, 1987) vs statistical independence  
+  - It is possible to use bootstrapping to perform an asymptote analysis  
+  - One can check the animals one-by-one (although this is time consuming)  
+  
+  
+#### Note:  
+Home Range Area Curve = plots the number of independent locations on the x-axis against the estimated home-range size on the y-axis. From the plot, the number of required locations is denoted when increasinf the number of locations does NOT result in an increasing home-range size (i.e. asymptotes of the graph) (Haines _et al._, 2009)  
+  
+  
+### Prepare data for adehabitatHR  
+  
+Extracting just the x and y data  
+```{r extract x and y data}
+xyt <- subset(locs, select = c(X, Y))
+
+```
+  
+
+Extracting just the bird IDs  
+```{r extract bird IDs}
+bird_id <- subset(locs, select = bird)
+
+```
+
+  
+
+Creating a SpatialPointsDataFrame for the package adehabitatHR  
+**SpatialPointsDataFrame** =  
+  
+```{r create spatialpointsdataframe}
+locs_1              <- bird_id  
+coordinates(locs_1) <- xyt
+
+class(locs_1)
+
+```
+  
+  
+Plot the point data  
+  
+```{r plot initial point data}
+plot(locs_1,
+     col = as.data.frame(locs_1)[, 1])
+
+```
+  
+  
+### Minimum Convex Polygons  
+  
+Running the 95% Minimum Convex Polygon analysis  
+This method calculates the smallest polygon enclosing 95% (removing 5% of the most extreme points) of the relocations of the animal. It is considered to be the home range of the animal.  
+_home range_ is defined as the area traversed by the animal during its **normal** activities of foraging, mating, caring for young. Due to this reason, it is common to remove a small percentage of the relocations furthest from the centroid of the cloud of relocations before estimations.  
+MCP can be used to describe the extent of distribution of locations of an animal but **NOT** as an estimation of home rnage size.  
+  
+```{r calc mcp 95}
+locs_1_cp <- mcp(locs_1[, 1],
+                 percent = 95)
+
+```
+  
+  
+```{r graph of polygons and points}
+plot(locs_1_cp)
+
+plot(locs_1,
+     col = as.data.frame(locs_1)[, 1],
+     add = T)
+# adding colour for each species
+
+```
+  
+  
+Obtain the area of the polygon  
+  
+```{r area of polygon}
+locs_1_cp
+
+```
+  
+  
+Write the polygon to a shapefile  
+```{r write shapefile}
+writePolyShape(locs_1_cp, "HomeRange/HR_data/RS_mcp")
+
+```
+  
+writePolyShape is deprecated; use rgdal::writeOGR or sf::st_write  
+  
+  
+  
+### Kernel Density Estimation in 2D  
+
+#==== Kernel Density Estimation ====#
+This is a non-parametric method of estimating the probability density function of a random variable. It is a fundamental data smoothing problem where inferences about the population (data points/locations) are made based on a finited data sample.  
+It is used to delineate where geo-tracked animals spend their time.  
+KDE optimizers are sensitive to temporal autocorrelation.  
+#==== ====#
+  
+Now we will calculate home range size using the kernel density estimator.  
+It uses a _Utilization Distribution_ (UD) to calculate home range size based on the distribution of the points.  
+Under this model, it is considered that animals use of space can be described by a _bivariate_ probability density function.  
+This gives the probability density to relocate the animal at any place according to the coordinates (x, y) of this place.  
+Home range sizes can be calculated by running the _Kernel Density Estimation_ (KDE) using the _Least Square Cross Validation_ technique.  
+A bivariate kernel function is placed over each relocation, and the values of these functions are averaged together.  
+Least-Squares Cross Validation is suggested to be better at identifying distributions with tight clumps.  
+(Note: h is the smoothing parameter - this controls the width of the kernel functions placed over each point)  
+  
+```{r obtain kernel UD}
+locs_1_kud <- kernelUD(locs_1[, 1],
+                       h = "LSCV")
+
+```
+  
+  
+Converting the KDE as vectors:  
+```{r kde vectors}
+homerange_locs_1 <- getverticeshr(locs_1_kud)
+
+
+```
+  
+  
+```{r class of vectors}
+class(homerange_locs_1)
+
+```
+  
+  
+Plot the vector  
+```{r plotting the vector}
+plot(homerange_locs_1,
+     col = 1:3)
+
+```
+  
+  
+Calculating the area for the different _isopleths_ (UDs).  
+- areas are in hectares  
+- 95% is the standard for "home range size"  
+- 50% is often used for the core area  
+  
+```{r calculate area of kd}
+locs_1_kde_area <- kernel.area(locs_1_kud,
+                               percent = c(50, 95))
+
+```
+  
+  
+```{r kde area}
+locs_1_kde_area
+
+```
+  
+  
+Plot the different isopleths:  
+- for the second animal only  
+  
+```{r plot isopleth for animal 2}
+# First get volume of the UD
+vud_2 <- getvolumeUD(locs_1_kud)
+image(vud_2[[2]])
+xyzv <- as.image.SpatialGridDataFrame(vud_2[[2]])
+contour(xyzv, add = TRUE)
+
+```
+  
+  
+GPS data are autocorrelated - so they can pose difficulties in estimating the bandwidth and violate assumptions of independence of locations that are inherent to the KDE.  
+Datasets for avian and mammal species can include > 10,000 locations, and only the reference or default bandwidth (**href**) was able to produce KDE in adehabitat.  
+Estimation with href is NOT reliable for use on multimodal datasets because it results in over-smoothing of home ranges and the multimodal distribution of locations is typical for most species.  
+  
+Obtain the KDE home range using href  
+ - use href instead of LSCV because the isolated home range blobs look odd  
+  
+```{r kde using href}
+kudhref <- kernelUD(locs_1[, 1],
+                    h = "href")
+
+```
+  
+  
+Convert the 95% KDE as vectors  
+  
+```{r 95 kde href}
+homerange_locs_1href <- getverticeshr(kudhref, 
+                                      percent = 95)
+
+```
+  
+  
+Plot the vector and points  
+```{r plot kde href}
+plot(homerange_locs_1href,
+     border = 1:3,
+     lwd = 6)
+
+plot(locs_1,
+     col = as.data.frame(locs_1)[, 1],
+     add = T)
+
+```
+  
+  
+This does look slightly better than before.  
+It is important to relate this to the ecology of the species, which might determine the home range method used.  
+  
+Export shapefile  
+```{r export kde href}
+writePolyShape(homerange_locs_1href,
+               "HomeRange/HR_data/95kde_href") 
+
+```
+  
+  
+Core Area: Using 50 KDE as vectors  
+  
+```{r core kdehref}
+homerange_locs_1href_core <- getverticeshr(kudhref,
+                                           percent = 50)
+
+```
+  
+  
+```{r plot the core area}
+plot(homerange_locs_1href,
+     border = 1:3,
+     lwd = 6)
+
+plot(locs_1,
+     col = as.data.frame(locs_1)[, 1],
+     add = T)
+
+plot(homerange_locs_1href_core,
+     border = 1:3,
+     lwd = 4,
+     lty = "dashed",
+     add = T)
+
+```
+  
+Final plot showing locations within the typically associated 95% home range boundaries and core areas for common scale-backed antbird _Willisornis poecilinotus_, black-headed antbird _Percnostola rufifrons_, and rufous-capped anthrush _Formicarius colma_.
+  
+```{r export core shapefile}
+writePolyShape(homerange_locs_1href_core,
+               "HomeRange/HR_data/core_50_kde_href")
+
+```
+
+
+
+
