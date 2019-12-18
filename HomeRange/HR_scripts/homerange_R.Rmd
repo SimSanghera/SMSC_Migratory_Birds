@@ -350,7 +350,268 @@ writePolyShape(homerange_locs_1href_core,
                "HomeRange/HR_data/core_50_kde_href")
 
 ```
+  
+  
+  
 
+#------
+  
+## 3D Kernel Density Estimation  
+
+
+### Data Prep  
+  
+```{r, echo = FALSE}
+# Install packages and load libraries
+libraries <- 
+  c(
+    "ks",
+    "MASS",
+    "KernSmooth",
+    "CircStats",
+    "deSolve",
+    "deldir",
+    "igraph",
+    "RandomFields"
+  )
+
+ins.packages <- function(pkg) {
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg))
+    install.packages(new.pkg,
+                     dependencies = TRUE,
+                     type = "binary",
+                     force = TRUE)
+  sapply(pkg,
+         require,
+         character.only = TRUE)
+}
+
+ins.packages(libraries)
+
+
+```
+  
+  
+Remove the column called "rec" from the locations dataset - this will leave us with just the X, Y, Z and bird columns.  
+  
+```{r remove rec from locs}
+locs_3D <- dplyr::select(locs, -(rec))
+  
+```
+  
+  
+Split the locations object (locs_3D) into 3 different objects:  
+ - one per animal  
+ - call objects after names in bird column
+ - remove bird column from each new dataframe
+  
+```{r YWFA}
+YWFA <- locs_3D %>%
+  dplyr::filter(bird == "YWFA,Y_G") %>%
+  dplyr::select(X, Y, Z)
+
+```
+  
+  
+```{r RSFA}
+RSFA <- locs_3D %>%
+  dplyr::filter(bird == "RSFA_BK,O") %>%
+  dplyr::select(X, Y, Z)
+
+```
+
+  
+```{r RSMBK}
+RSMBK <- locs_3D %>%
+  dplyr::filter(bird == "RSMBK,BK_A") %>%
+  dplyr::select(X, Y, Z)
+
+```
+  
+  
+### 3D Data Analyses  
+  
+A kernel distribution (3-dimensional hill or kernel) is place on each telemetry location. The height of the hill is determined by the **bandwidth** of the distribution.  
+Many distributions and methods are available:  
+ - fixed  
+ - fixed vs adaptive  
+ - univariate  
+ - bivariate  
+  
+This calls the plug-in bandwidth estimator. This is generally accepted as safest.  If the resulting territories are lots of separated pieces, it is possible to multiply the Hpi by factors larger than 1.  
+  
+```{r call bandwidth estimators}
+H_YWFA <- Hpi(YWFA)
+H_RSFA <- Hpi(RSFA)
+H_RSMBK <- Hpi(RSMBK) 
+
+```
+  
+  
+Join 2 of the datasets and then determine maximum and minimum for each dimension.  
+It is important that overlapping territories are evaluated in the same physical space.  
+It is a good idea to add buffer points so that no part of the territories are cut off.  
+  
+```{r join datasets get min}
+YWFA_RSFA <- rbind(YWFA, RSFA)
+
+minX <- min(YWFA_RSFA$X) - 25
+minY <- min(YWFA_RSFA$Y) - 25
+minZ <- 0
+
+```
+  
+  
+```{r join YWFA_RSFA get max}
+maxX <- max(YWFA_RSFA$X) + 25
+maxY <- max(YWFA_RSFA$Y) + 25
+maxZ <- max(YWFA_RSFA$Z) + 5
+
+```
+  
+  
+Kernel density analyses:  
+ - gridsize = number of 3D pixels / voxels that the space is divided up into  
+  
+```{r YFWA kde 3D}
+fhat_YWFA <- kde(x = YWFA,
+                 H = H_YWFA,
+                 binned = FALSE,
+                 xmin = c(minX, minY, minZ),
+                 gridsize = 151,
+                 xmax = c(maxX, maxY, maxZ))
+
+```
+  
+  
+```{r RSFA kde 3D}
+fhat_RSFA <- kde(x = RSFA,
+                 H = H_RSFA,
+                 binned = FALSE,
+                 xmin = c(minX, minY, minZ),
+                 gridsize = 151,
+                 xmax = c(maxX, maxY, maxY))
+
+```
+  
+  
+```{r RSMBK kde 3D}
+fhat_RSMBK <- kde(x = RSMBK,
+                  H = H_RSMBK,
+                  binned = FALSE,
+                  xmin = c(minX, minY, minZ),
+                  gridsize = 151,
+                  xmax = c(maxX, maxY, maxZ))
+
+```
+  
+  
+Calculate the isopleth at 95%  
+ - ct just produces a number  
+ - this all voxels with a density greater than ct_YWFA would be in that isopleth  
+  
+```{r kde 3d 95 YWFA}
+ct_YWFA <- contourLevels(fhat_YWFA,
+                         cont = 95,
+                         approx = FALSE)
+
+```
+  
+  
+```{r kde 3d 95 RSFA}
+ct_RSFA <- contourLevels(fhat_RSFA,
+                         cont = 95,
+                         approx = FALSE)
+
+```
+  
+  
+```{r kde 3d 95 RSMBK}
+ct_RSMBK <- contourLevels(fhat_RSMBK,
+                          cont = 95,
+                          approx = FALSE)
+
+```
+  
+  
+Calculate the volume of each territory at 95th isopleth.  
+If UTMs used, then the units should be m^3^.  
+  
+```{r volume of kde YWFA}
+vol_95_ywfa <- contourSizes(fhat_YWFA,
+                            cont = 95)
+
+```
+  
+  
+```{r volume kde RSFA}
+vol_95_rsfa <- contourSizes(fhat_RSFA,
+                            cont = 95)
+
+```
+  
+  
+```{r volume kde RSMBK}
+vol_95_rsmbk <- contourSizes(fhat_RSMBK,
+                             cont = 95)
+
+```
+  
+  
+Plot the home ranges in 3D:  
+  
+```{r plot 3d home ranges YWFA}
+plot(fhat_YWFA,
+     cont = c(95),
+     colors = ("green"),
+     drawpoints = TRUE,
+     xlab = "",
+     ylab = "",
+     zlab = "",
+     xlim = c(minX, maxX),
+     ylim = c(minY, maxY),
+     zlim = c(minZ, maxZ),
+     size = 2,
+     ptcol = "green")
+
+```
+  
+  
+```{r plot home range 3d RSFA}
+plot(fhat_RSFA,
+     cont = c(95),
+     colors = ("black"),
+     drawpoints = TRUE,
+     xlab = "",
+     ylab = "",
+     zlab = "",
+     xlim = c(minX, maxX),
+     ylim = c(minY, maxY),
+     zlim = c(minZ, maxZ),
+     size = 2,
+     ptcol = "black")
+
+```
+  
+  
+```{r plot home range 3d RSMBK}
+plot(fhat_RSMBK,
+     cont = c(95),
+     colors = ("red"),
+     drawpoints = TRUE,
+     xlab = "",
+     ylab = "",
+     zlab = "",
+     xlim = c(minX, maxX),
+     ylim = c(minY, maxY),
+     zlim = c(minZ, maxZ),
+     size = 2,
+     ptcol = "red")
+
+```
+  
+  
 
 
 

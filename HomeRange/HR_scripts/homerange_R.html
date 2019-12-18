@@ -656,6 +656,144 @@ plot(homerange_locs_1href_core,
 <pre class="r"><code>writePolyShape(homerange_locs_1href_core,
                &quot;HomeRange/HR_data/core_50_kde_href&quot;)</code></pre>
 <pre><code>## Warning: writePolyShape is deprecated; use rgdal::writeOGR or sf::st_write</code></pre>
+<p>#——</p>
+</div>
+<div id="d-kernel-density-estimation" class="section level2">
+<h2>3D Kernel Density Estimation</h2>
+<div id="data-prep" class="section level3">
+<h3>Data Prep</h3>
+<pre><code>## Loading required package: ks</code></pre>
+<pre><code>## Loading required package: KernSmooth</code></pre>
+<pre><code>## KernSmooth 2.23 loaded
+## Copyright M. P. Wand 1997-2009</code></pre>
+<pre><code>## Loading required package: deSolve</code></pre>
+<pre><code>## Loading required package: igraph</code></pre>
+<pre><code>## 
+## Attaching package: &#39;igraph&#39;</code></pre>
+<pre><code>## The following object is masked from &#39;package:ks&#39;:
+## 
+##     compare</code></pre>
+<pre><code>## The following objects are masked from &#39;package:dplyr&#39;:
+## 
+##     as_data_frame, groups, union</code></pre>
+<pre><code>## The following objects are masked from &#39;package:purrr&#39;:
+## 
+##     compose, simplify</code></pre>
+<pre><code>## The following object is masked from &#39;package:tidyr&#39;:
+## 
+##     crossing</code></pre>
+<pre><code>## The following object is masked from &#39;package:tibble&#39;:
+## 
+##     as_data_frame</code></pre>
+<pre><code>## The following objects are masked from &#39;package:stats&#39;:
+## 
+##     decompose, spectrum</code></pre>
+<pre><code>## The following object is masked from &#39;package:base&#39;:
+## 
+##     union</code></pre>
+<pre><code>## Loading required package: RandomFields</code></pre>
+<pre><code>## Loading required package: RandomFieldsUtils</code></pre>
+<pre><code>## 
+## Attaching package: &#39;RandomFields&#39;</code></pre>
+<pre><code>## The following object is masked from &#39;package:RandomFieldsUtils&#39;:
+## 
+##     RFoptions</code></pre>
+<pre><code>##           ks         MASS   KernSmooth    CircStats      deSolve 
+##         TRUE         TRUE         TRUE         TRUE         TRUE 
+##       deldir       igraph RandomFields 
+##         TRUE         TRUE         TRUE</code></pre>
+<p>Remove the column called “rec” from the locations dataset - this will leave us with just the X, Y, Z and bird columns.</p>
+<pre class="r"><code>locs_3D &lt;- dplyr::select(locs, -(rec))</code></pre>
+<p>Split the locations object (locs_3D) into 3 different objects:<br />
+- one per animal<br />
+- call objects after names in bird column - remove bird column from each new dataframe</p>
+<pre class="r"><code>YWFA &lt;- locs_3D %&gt;%
+  dplyr::filter(bird == &quot;YWFA,Y_G&quot;) %&gt;%
+  dplyr::select(X, Y, Z)</code></pre>
+<pre class="r"><code>RSFA &lt;- locs_3D %&gt;%
+  dplyr::filter(bird == &quot;RSFA_BK,O&quot;) %&gt;%
+  dplyr::select(X, Y, Z)</code></pre>
+<pre class="r"><code>RSMBK &lt;- locs_3D %&gt;%
+  dplyr::filter(bird == &quot;RSMBK,BK_A&quot;) %&gt;%
+  dplyr::select(X, Y, Z)</code></pre>
+</div>
+<div id="d-data-analyses" class="section level3">
+<h3>3D Data Analyses</h3>
+<p>A kernel distribution (3-dimensional hill or kernel) is place on each telemetry location. The height of the hill is determined by the <strong>bandwidth</strong> of the distribution.<br />
+Many distributions and methods are available:<br />
+- fixed<br />
+- fixed vs adaptive<br />
+- univariate<br />
+- bivariate</p>
+<p>This calls the plug-in bandwidth estimator. This is generally accepted as safest. If the resulting territories are lots of separated pieces, it is possible to multiply the Hpi by factors larger than 1.</p>
+<pre class="r"><code>H_YWFA &lt;- Hpi(YWFA)
+H_RSFA &lt;- Hpi(RSFA)
+H_RSMBK &lt;- Hpi(RSMBK) </code></pre>
+<p>Join 2 of the datasets and then determine maximum and minimum for each dimension.<br />
+It is important that overlapping territories are evaluated in the same physical space.<br />
+It is a good idea to add buffer points so that no part of the territories are cut off.</p>
+<pre class="r"><code>YWFA_RSFA &lt;- rbind(YWFA, RSFA)
+
+minX &lt;- min(YWFA_RSFA$X) - 25
+minY &lt;- min(YWFA_RSFA$Y) - 25
+minZ &lt;- 0</code></pre>
+<pre class="r"><code>maxX &lt;- max(YWFA_RSFA$X) + 25
+maxY &lt;- max(YWFA_RSFA$Y) + 25
+maxZ &lt;- max(YWFA_RSFA$Z) + 5</code></pre>
+<p>Kernel density analyses:<br />
+- gridsize = number of 3D pixels / voxels that the space is divided up into</p>
+<pre class="r"><code>fhat_YWFA &lt;- kde(x = YWFA,
+                 H = H_YWFA,
+                 binned = FALSE,
+                 xmin = c(minX, minY, minZ),
+                 gridsize = 151,
+                 xmax = c(maxX, maxY, maxZ))</code></pre>
+<pre class="r"><code>fhat_RSFA &lt;- kde(x = RSFA,
+                 H = H_RSFA,
+                 binned = FALSE,
+                 xmin = c(minX, minY, minZ),
+                 gridsize = 151,
+                 xmax = c(maxX, maxY, maxY))</code></pre>
+<pre class="r"><code>fhat_RSMBK &lt;- kde(x = RSMBK,
+                  H = H_RSMBK,
+                  binned = FALSE,
+                  xmin = c(minX, minY, minZ),
+                  gridsize = 151,
+                  xmax = c(maxX, maxY, maxZ))</code></pre>
+<p>Calculate the isopleth at 95%<br />
+- ct just produces a number<br />
+- this all voxels with a density greater than ct_YWFA would be in that isopleth</p>
+<pre class="r"><code>ct_YWFA &lt;- contourLevels(fhat_YWFA,
+                         cont = 95,
+                         approx = FALSE)</code></pre>
+<pre class="r"><code>ct_RSFA &lt;- contourLevels(fhat_RSFA,
+                         cont = 95,
+                         approx = FALSE)</code></pre>
+<pre class="r"><code>ct_RSMBK &lt;- contourLevels(fhat_RSMBK,
+                          cont = 95,
+                          approx = FALSE)</code></pre>
+<p>Calculate the volume of each territory at 95th isopleth.<br />
+If UTMs used, then the units should be m<sup>3</sup>.</p>
+<pre class="r"><code>vol_95_ywfa &lt;- contourSizes(fhat_YWFA,
+                            cont = 95)</code></pre>
+<pre class="r"><code>vol_95_rsfa &lt;- contourSizes(fhat_RSFA,
+                            cont = 95)</code></pre>
+<pre class="r"><code>vol_95_rsmbk &lt;- contourSizes(fhat_RSMBK,
+                             cont = 95)</code></pre>
+<p>Plot the home ranges in 3D:</p>
+<pre class="r"><code>plot(fhat_YWFA,
+     cont = c(95),
+     colors = (&quot;green&quot;),
+     drawpoints = TRUE,
+     xlab = &quot;&quot;,
+     ylab = &quot;&quot;,
+     zlab = &quot;&quot;,
+     xlim = c(minX, maxX),
+     ylim = c(minY, maxY),
+     zlim = c(minZ, maxZ),
+     size = 2,
+     ptcol = &quot;green&quot;)</code></pre>
+</div>
 </div>
 
 
